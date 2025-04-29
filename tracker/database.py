@@ -1,22 +1,27 @@
 import sqlite3
 
 REQUIRED_COLUMNS = {
-    "recruiters": [
+    "outreaches": [
         ("last_response", "TEXT"),
+        ("status", "TEXT"),
+        ("notes", "TEXT")
+    ],
+    "companies": [
+        ("application_link", "TEXT"),
         ("status", "TEXT"),
         ("notes", "TEXT")
     ]
 }
 
 def get_connection():
-    return sqlite3.connect("recruiter_tracker.db")
+    return sqlite3.connect("outreach_tracker.db")
 
 def create_tables():
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS recruiters (
+        CREATE TABLE IF NOT EXISTS outreaches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
             company TEXT,
@@ -37,9 +42,7 @@ def create_tables():
         CREATE TABLE IF NOT EXISTS companies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
-            industry TEXT,
-            website TEXT,
-            applied BOOLEAN DEFAULT 0,
+            application_link TEXT,
             status TEXT,
             notes TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

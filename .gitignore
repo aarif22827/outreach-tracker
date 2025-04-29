@@ -4,7 +4,7 @@ __pycache__/
 *$py.class
 
 # SQLite database
-recruiter_tracker.db
+outreach_tracker.db
 
 # Virtual environments
 venv/
