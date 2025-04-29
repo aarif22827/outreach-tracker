@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SQLite database
+recruiter_tracker.db
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# VSCode files
+.vscode/
+
+# Mac OS
+.DS_Store
+
+# PyCharm
+.idea/
+
+# Logs
+*.log

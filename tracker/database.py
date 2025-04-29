@@ -1,0 +1,67 @@
+import sqlite3
+
+REQUIRED_COLUMNS = {
+    "recruiters": [
+        ("last_response", "TEXT"),
+        ("status", "TEXT"),
+        ("notes", "TEXT")
+    ]
+}
+
+def get_connection():
+    return sqlite3.connect("recruiter_tracker.db")
+
+def create_tables():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS recruiters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            company TEXT,
+            title TEXT,
+            linkedin_url TEXT,
+            connection_sent BOOLEAN DEFAULT 0,
+            message_sent BOOLEAN DEFAULT 0,
+            followup_sent BOOLEAN DEFAULT 0,
+            status TEXT,
+            last_response TEXT,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            industry TEXT,
+            website TEXT,
+            applied BOOLEAN DEFAULT 0,
+            status TEXT,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+    migrate_schema()
+
+def migrate_schema():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    for table, columns in REQUIRED_COLUMNS.items():
+        cursor.execute(f"PRAGMA table_info({table})")
+        existing_columns = [col[1] for col in cursor.fetchall()]
+
+        for column_name, column_type in columns:
+            if column_name not in existing_columns:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}")
+
+    conn.commit()
+    conn.close()
