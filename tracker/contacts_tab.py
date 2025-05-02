@@ -50,7 +50,6 @@ def build_contacts_tab(parent, status_options):
     tree.heading("Delete", text="Delete")
     tree.column("Delete", width=60, anchor="center")
     
-    # Set a reasonable width for Notes column
     tree.column("Notes", width=200)
     
     scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
@@ -58,7 +57,6 @@ def build_contacts_tab(parent, status_options):
     scrollbar.pack(side="right", fill="y")
     tree.pack(fill="both", expand=True)
     
-    # Dictionary to store the full notes text
     full_notes = {}
 
     def truncate_text(text, max_length=50):
@@ -165,14 +163,12 @@ def build_contacts_tab(parent, status_options):
         cursor.execute(query, params)
         
         for row in cursor.fetchall():
-            rid = str(row[0])  # Ensure ID is a string for dictionary key
-            # Store the full note with string conversion to handle NULL values
+            rid = str(row[0])
             note_text = str(row[8]) if row[8] is not None else ""
             full_notes[rid] = note_text
             
-            # Create display values - truncate notes
             display_values = list(row[1:])
-            display_values[7] = truncate_text(note_text)  # Notes are at index 7 in display_values
+            display_values[7] = truncate_text(note_text)
             
             tree.insert("", "end", iid=rid, values=(*display_values, "❌"))
         conn.close()
@@ -188,7 +184,7 @@ def build_contacts_tab(parent, status_options):
         
         item_id_str = str(item_id)
         
-        if column_index == 8:  # Delete column
+        if column_index == 8:
             confirm = messagebox.askyesno("Delete", "Are you sure you want to delete this contact?")
             if confirm:
                 conn = get_connection()
@@ -198,26 +194,22 @@ def build_contacts_tab(parent, status_options):
                 conn.close()
                 refresh_tree(search_var.get(), filter_status_var.get())
                 reset_form()
-        else:  # Just edit on click
+        else:
             edit_contact(item_id_str)
     
     tree.bind("<ButtonRelease-1>", on_tree_click)
     
-    # Improved column resize function
     def resize_column(event):
         region = tree.identify_region(event.x, event.y)
         if region == "separator":
-            # Get the column to resize
             column = tree.identify_column(event.x)
             column_index = int(column.replace('#', '')) - 1
             
             if 0 <= column_index < len(columns):
                 col_name = columns[column_index]
                 
-                # Get the current width
                 current_width = tree.column(col_name, "width")
                 
-                # Calculate the width needed for all content
                 header_width = font.Font().measure(col_name) + 20
                 max_width = header_width
                 
@@ -228,10 +220,8 @@ def build_contacts_tab(parent, status_options):
                         cell_width = font.Font().measure(cell_value) + 20
                         max_width = max(max_width, cell_width)
                 
-                # Set the new width for just this column
                 tree.column(col_name, width=max(100, max_width))
     
-    # Bind to separator single-click
     tree.bind("<ButtonPress-1>", resize_column)
     
     def on_double_click(event):
@@ -244,12 +234,12 @@ def build_contacts_tab(parent, status_options):
         
         item_id_str = str(item_id)
         
-        if column_index == 4:  # LinkedIn column
+        if column_index == 4:
             values = tree.item(item_id, 'values')
             linkedin_url = values[4]
             if linkedin_url:
                 webbrowser.open(linkedin_url)
-        elif column_index == 7:  # Notes column - moved here from single click
+        elif column_index == 7:
             view_full_note(item_id_str)
     
     tree.bind("<Double-1>", on_double_click)
@@ -294,7 +284,6 @@ def build_contacts_tab(parent, status_options):
         
         entry_notes.delete("1.0", tk.END)
         
-        # Use the full note from our dictionary
         item_id_str = str(item_id)
         if item_id_str in full_notes:
             entry_notes.insert("1.0", full_notes[item_id_str])
