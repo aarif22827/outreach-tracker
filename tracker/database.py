@@ -4,9 +4,11 @@ REQUIRED_COLUMNS = {
     "outreaches": [
         ("last_response", "TEXT"),
         ("status", "TEXT"),
-        ("notes", "TEXT")
+        ("notes", "TEXT"),
+        ("email", "TEXT")
     ],
-    "companies": [
+    "applications": [
+        ("title", "TEXT"),
         ("application_link", "TEXT"),
         ("status", "TEXT"),
         ("notes", "TEXT")
@@ -26,6 +28,7 @@ def create_tables():
             name TEXT,
             company TEXT,
             title TEXT,
+            email TEXT,
             linkedin_url TEXT,
             connection_sent BOOLEAN DEFAULT 0,
             message_sent BOOLEAN DEFAULT 0,
@@ -39,9 +42,10 @@ def create_tables():
     ''')
 
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS companies (
+        CREATE TABLE IF NOT EXISTS applications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
+            title TEXT,
             application_link TEXT,
             status TEXT,
             notes TEXT,
