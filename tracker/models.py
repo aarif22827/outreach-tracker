@@ -18,3 +18,18 @@ class Application:
     application_link: str = ""
     status: str = "📝 Not Applied"
     notes: str = ""
+
+@dataclass
+class Document:
+    name: str
+    type: str
+    version: str = "1.0"
+    file_content: bytes = None
+    file_type: str = ""
+    notes: str = ""
+
+@dataclass
+class MessageTemplate:
+    name: str
+    category: str
+    content: str = ""

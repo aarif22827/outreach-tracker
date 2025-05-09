@@ -2,9 +2,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox, font
 import webbrowser
 from datetime import datetime
+from tkcalendar import DateEntry
 from tracker.database import get_connection
 
-def build_applications_tab(parent, status_options):
+def build_applications_tab(parent, status_options, check_reminders_callback=None):
     editing_id = None
     
     sort_column = ""
@@ -41,13 +42,12 @@ def build_applications_tab(parent, status_options):
     table_frame = tk.Frame(parent)
     table_frame.pack(fill="both", expand=True)
 
-    columns = ("Title", "Company", "Application Link", "Status", "Last Updated", "Notes", "Delete")
+    # Removed Delete column
+    columns = ("Title", "Company", "Application Link", "Status", "Last Updated", "Notes")
     tree = ttk.Treeview(table_frame, columns=columns, show="headings")
-    for col in columns[:-1]:
+    for col in columns:
         tree.heading(col, text=col, command=lambda c=col: toggle_sort(c))
         tree.column(col, width=150, anchor="w")
-    tree.heading("Delete", text="Delete")
-    tree.column("Delete", width=60, anchor="center")
     
     tree.column("Notes", width=200)
     
@@ -105,7 +105,7 @@ def build_applications_tab(parent, status_options):
             sort_column = column
             sort_direction = "asc"
         
-        for col in columns[:-1]:
+        for col in columns:
             tree.heading(col, text=col, command=lambda c=col: toggle_sort(c))
         
         if sort_direction == "asc":
@@ -168,32 +168,73 @@ def build_applications_tab(parent, status_options):
             display_values = list(row[1:])
             display_values[5] = truncated_note
             
-            tree.insert("", "end", iid=rid, values=(*display_values, "❌"))
+            # Removed the delete button
+            tree.insert("", "end", iid=rid, values=display_values)
         conn.close()
 
+    # Context menu implementation
+    def show_context_menu(event):
+        item_id = tree.identify_row(event.y)
+        if not item_id:
+            return
+        
+        # Select the row first
+        tree.selection_set(item_id)
+        
+        # Create context menu
+        context_menu = tk.Menu(tree, tearoff=0)
+        
+        # Get application details for context-sensitive options
+        values = tree.item(item_id, 'values')
+        
+        # Always add Edit option
+        context_menu.add_command(label="Edit", command=lambda: edit_application(item_id))
+        
+        # Add application link option only if it exists
+        application_link = values[2] if len(values) > 2 else None
+        if application_link and application_link.strip():
+            context_menu.add_command(label="Open Link", 
+                                  command=lambda: webbrowser.open(application_link))
+        
+        # Always add Reminder option
+        context_menu.add_command(label="Set Reminder", 
+                              command=lambda: set_reminder_for_selected())
+        
+        # Add View Notes option only if there are notes
+        if item_id in full_notes and full_notes[item_id].strip():
+            context_menu.add_command(label="View Full Notes", 
+                                  command=lambda: view_full_note(item_id))
+        
+        context_menu.add_separator()
+        
+        # Always add Delete option
+        context_menu.add_command(label="Delete", 
+                              command=lambda: delete_application(item_id))
+        
+        # Display context menu
+        context_menu.tk_popup(event.x_root, event.y_root)
+        
+    tree.bind("<Button-3>", show_context_menu)  # Right-click
+    
+    def delete_application(item_id):
+        confirm = messagebox.askyesno("Delete", "Are you sure you want to delete this application?")
+        if confirm:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM applications WHERE id = ?", (item_id,))
+            conn.commit()
+            conn.close()
+            refresh_tree(search_var.get(), filter_status_var.get())
+            reset_form()
+
+    # Modified on_tree_click to handle single click without delete column
     def on_tree_click(event):
         item_id = tree.identify_row(event.y)
         if not item_id:
             reset_form()
             return
         
-        column = tree.identify_column(event.x)
-        column_index = int(column.replace('#', '')) - 1
-        
-        item_id_str = str(item_id)
-        
-        if column_index == 6:
-            confirm = messagebox.askyesno("Delete", "Are you sure you want to delete this application?")
-            if confirm:
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM applications WHERE id = ?", (item_id,))
-                conn.commit()
-                conn.close()
-                refresh_tree(search_var.get(), filter_status_var.get())
-                reset_form()
-        else:
-            edit_application(item_id_str)
+        edit_application(item_id)
     
     tree.bind("<ButtonRelease-1>", on_tree_click)
     
@@ -230,15 +271,9 @@ def build_applications_tab(parent, status_options):
         column = tree.identify_column(event.x)
         column_index = int(column.replace('#', '')) - 1
         
-        item_id_str = str(item_id)
-        
-        if column_index == 2:
-            values = tree.item(item_id, 'values')
-            application_link = values[2]
-            if application_link:
-                webbrowser.open(application_link)
-        elif column_index == 5:
-            view_full_note(item_id_str)
+        # Only handle double click for notes column to view full notes
+        if column_index == 5:  # Notes column
+            view_full_note(item_id)
     
     tree.bind("<Double-1>", on_double_click)
     
@@ -247,6 +282,26 @@ def build_applications_tab(parent, status_options):
             reset_form()
     
     table_frame.bind("<Button-1>", on_frame_click)
+    
+    # Add function to set reminder for currently selected application
+    def set_reminder_for_selected():
+        selected_items = tree.selection()
+        if not selected_items:
+            messagebox.showinfo("Info", "Please select an application first.")
+            return
+        
+        item_id = selected_items[0]
+        
+        # Get application details
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT title, name FROM applications WHERE id = ?", (item_id,))
+        app = cursor.fetchone()
+        conn.close()
+        
+        if app:
+            title, company = app
+            create_reminder(item_id, f"{title} at {company}")
     
     def edit_application(item_id):
         nonlocal editing_id
@@ -346,18 +401,109 @@ def build_applications_tab(parent, status_options):
                 (name, title, application_link, status, notes)
                 VALUES (?, ?, ?, ?, ?)''',
                 (company, title, application_link, status, notes))
+            
+            # Get the id of the last inserted row
+            if status in ["✅ Applied", "🔍 Under Review"]:
+                cursor.execute("SELECT last_insert_rowid()")
+                new_id = cursor.fetchone()[0]
+                editing_id = new_id
+                
+                # Prompt to create a follow-up reminder
+                if messagebox.askyesno("Create Reminder", "Would you like to set a follow-up reminder for this application?"):
+                    create_reminder(editing_id, f"{title} at {company}")
         
         conn.commit()
         conn.close()
         
         reset_form()
         refresh_tree(search_var.get(), filter_status_var.get())
+    
+    def create_reminder(app_id, app_name):
+        reminder_window = tk.Toplevel()
+        reminder_window.title("Set Follow-up Reminder")
+        reminder_window.geometry("400x300")
+        reminder_window.transient(parent)
+        
+        tk.Label(reminder_window, text=f"Reminder for: {app_name}").pack(pady=10)
+        
+        tk.Label(reminder_window, text="Title:").pack(anchor="w", padx=20)
+        title_var = tk.StringVar(value=f"Follow up on {app_name}")
+        title_entry = tk.Entry(reminder_window, textvariable=title_var, width=40)
+        title_entry.pack(padx=20, fill="x")
+        
+        tk.Label(reminder_window, text="Description:").pack(anchor="w", padx=20, pady=(10,0))
+        desc_frame = tk.Frame(reminder_window)
+        desc_frame.pack(padx=20, fill="both", expand=True)
+        
+        desc_text = tk.Text(desc_frame, height=4, wrap="word")
+        desc_scrollbar = tk.Scrollbar(desc_frame, command=desc_text.yview)
+        desc_text.configure(yscrollcommand=desc_scrollbar.set)
+        desc_text.pack(side="left", fill="both", expand=True)
+        desc_scrollbar.pack(side="right", fill="y")
+        
+        desc_text.insert("1.0", "Send a follow-up email to check on the status of the application.")
+        
+        tk.Label(reminder_window, text="Due Date:").pack(anchor="w", padx=20)
+        # Default to 7 days from now
+        due_date = DateEntry(reminder_window, width=20, background='darkblue',
+                          foreground='white', borderwidth=2, date_pattern='mm/dd/yyyy')
+        due_date.pack(anchor="w", padx=20)
+        
+        def save_reminder():
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO reminders
+                (related_type, related_id, title, description, due_date, status)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                "application",
+                app_id,
+                title_entry.get().strip(),
+                desc_text.get("1.0", "end-1c").strip(),
+                due_date.get_date().strftime("%m/%d/%Y"),
+                "pending"
+            ))
+            conn.commit()
+            conn.close()
+            messagebox.showinfo("Success", "Reminder created successfully!")
+            if check_reminders_callback:
+                check_reminders_callback()
+            reminder_window.destroy()
+        
+        button_frame = tk.Frame(reminder_window)
+        button_frame.pack(pady=15)
+        
+        save_button = tk.Button(button_frame, text="Save Reminder", command=save_reminder)
+        save_button.pack(side="left", padx=5)
+        
+        cancel_button = tk.Button(button_frame, text="Cancel", command=reminder_window.destroy)
+        cancel_button.pack(side="left", padx=5)
+    
+    def set_reminder():
+        if not editing_id:
+            messagebox.showinfo("Info", "Please select an application first or save the current application.")
+            return
+        
+        # Get application details
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT title, name FROM applications WHERE id = ?", (editing_id,))
+        app = cursor.fetchone()
+        conn.close()
+        
+        if app:
+            title, company = app
+            create_reminder(editing_id, f"{title} at {company}")
 
     button_frame = tk.Frame(parent)
     button_frame.pack(pady=5)
     
     add_button = tk.Button(button_frame, text="Add Application", command=add_or_update_application)
     add_button.pack(side="left", padx=5)
+    
+    reminder_button = tk.Button(button_frame, text="Set Reminder", command=set_reminder)
+    reminder_button.pack(side="left", padx=5)
     
     cancel_button = tk.Button(button_frame, text="Cancel", command=reset_form)
     cancel_button.pack(side="left", padx=5)
