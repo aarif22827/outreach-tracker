@@ -1,12 +1,13 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, font
+from tkinter import ttk, messagebox, filedialog
 import os
 import subprocess
 import tempfile
 from datetime import datetime
+from tracker.core.models import Document, Contact, Application
 from tracker.core.database import get_connection
-import base64
-from io import BytesIO
+from tracker.utils.ui_components import create_search_frame, create_filter_combobox, truncate_text, format_date
+from tracker.utils.document_utils import open_document as utils_open_document
 
 try:
     from PIL import Image, ImageTk
@@ -16,7 +17,6 @@ except ImportError:
     HAS_PDF_PREVIEW = False
 
 DOCUMENT_TYPES = ["Resume", "Cover Letter", "Portfolio", "References", "Other"]
-
 MAX_PREVIEW_SIZE = 5 * 1024 * 1024
 
 def build_documents_tab(parent):
@@ -31,21 +31,22 @@ def build_documents_tab(parent):
     actions_frame = ttk.Frame(list_frame)
     actions_frame.pack(fill="x", pady=5)
     
-    ttk.Label(actions_frame, text="Filter:").pack(side="left")
-    filter_var = tk.StringVar(value="All")
-    filter_combo = ttk.Combobox(actions_frame, textvariable=filter_var, 
-                             values=["All"] + DOCUMENT_TYPES, 
-                             state="readonly", width=15)
-    filter_combo.pack(side="left", padx=5)
+    filter_var = create_filter_combobox(
+        actions_frame, 
+        "Filter:", 
+        ["All"] + DOCUMENT_TYPES,
+        lambda: refresh_documents()
+    )
     
     upload_button = ttk.Button(actions_frame, text="Upload Document",
                             command=lambda: upload_document())
     upload_button.pack(side="right", padx=5)
     
-    search_var = tk.StringVar()
-    search_entry = ttk.Entry(actions_frame, textvariable=search_var, width=20)
-    search_entry.pack(side="right", padx=5)
-    ttk.Label(actions_frame, text="Search:").pack(side="right")
+    search_frame_obj, search_var = create_search_frame(
+        list_frame,
+        search_callback=lambda: refresh_documents(),
+        reset_callback=lambda: (search_var.set(""), filter_var.set("All"), refresh_documents())
+    )
     
     tree_frame = ttk.Frame(list_frame)
     tree_frame.pack(fill="both", expand=True, pady=5)
@@ -128,6 +129,7 @@ def build_documents_tab(parent):
     current_doc_id = None
     
     def upload_document():
+        """Open file dialog to select and upload a new document"""
         file_path = filedialog.askopenfilename(
             title="Select Document",
             filetypes=[
@@ -176,30 +178,24 @@ def build_documents_tab(parent):
         notes_scrollbar.pack(side="right", fill="y")
         
         def save_document():
+            """Save the uploaded document to the database"""
             try:
                 with open(file_path, "rb") as f:
                     file_content = f.read()
                 
-                file_type = os.path.splitext(file_path)[1][1:]
+                file_type = os.path.splitext(file_path)[1][1:] or "txt"
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                conn = get_connection()
-                cursor = conn.cursor()
-                
-                cursor.execute('''
-                    INSERT INTO documents 
-                    (name, type, version, file_content, file_type, notes)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (
-                    name_var.get(),
-                    type_var.get(),
-                    version_var.get(),
-                    file_content,
-                    file_type,
-                    notes_text.get("1.0", "end-1c")
-                ))
-                
-                conn.commit()
-                conn.close()
+                document = Document(
+                    name=name_var.get(),
+                    type=type_var.get(),
+                    version=version_var.get(),
+                    file_content=file_content,
+                    file_type=file_type,
+                    notes=notes_text.get("1.0", "end-1c"),
+                    created_at=current_time
+                )
+                document.save()
                 
                 messagebox.showinfo("Success", "Document uploaded successfully!")
                 popup.destroy()
@@ -218,7 +214,7 @@ def build_documents_tab(parent):
         cancel_button.pack(side="left", padx=5)
     
     def link_document(doc_id, doc_name):
-        """Function to link a document to contacts or applications"""
+        """Open a dialog to link document to contacts or applications"""
         popup = tk.Toplevel()
         popup.title(f"Link Document: {doc_name}")
         popup.geometry("600x500")
@@ -288,62 +284,52 @@ def build_documents_tab(parent):
         app_scrollbar.pack(side="right", fill="y")
         
         def load_contacts(search_text=""):
+            """Load contacts and preselect those linked to the document"""
             for item in contacts_tree.get_children():
                 contacts_tree.delete(item)
             
-            conn = get_connection()
-            cursor = conn.cursor()
+            document = Document.get_by_id(doc_id)
+            if not document:
+                return
+                
+            linked_contacts = []
+            for usage in document.find_related('contact'):
+                linked_contacts.append(usage.id)
+                
+            contacts = Contact.find_all()
+            if search_text:
+                contacts = [c for c in contacts if search_text.lower() in c.name.lower() 
+                           or search_text.lower() in c.company.lower()]
             
-            cursor.execute("""
-                SELECT o.id, o.name, o.company, o.title, 
-                    CASE WHEN du.id IS NOT NULL THEN 1 ELSE 0 END as is_linked
-                FROM outreaches o
-                LEFT JOIN document_usage du ON o.id = du.related_id 
-                    AND du.related_type = 'contact' AND du.document_id = ?
-            """, (doc_id,))
-            
-            linked_ids = []
-            
-            for row in cursor.fetchall():
-                item_id = row[0]
-                is_linked = row[4]
-                contacts_tree.insert("", "end", iid=item_id, values=row[1:4])
-                if is_linked:
-                    linked_ids.append(item_id)
-            
-            for item_id in linked_ids:
-                contacts_tree.selection_add(item_id)
-            
-            conn.close()
+            for contact in contacts:
+                contacts_tree.insert("", "end", iid=contact.id, values=(
+                    contact.name, contact.company, contact.title))
+                if contact.id in linked_contacts:
+                    contacts_tree.selection_add(contact.id)
         
         def load_applications(search_text=""):
+            """Load applications and preselect those linked to the document"""
             for item in app_tree.get_children():
                 app_tree.delete(item)
             
-            conn = get_connection()
-            cursor = conn.cursor()
+            document = Document.get_by_id(doc_id)
+            if not document:
+                return
+                
+            linked_applications = []
+            for usage in document.find_related('application'):
+                linked_applications.append(usage.id)
+                
+            applications = Application.find_all()
+            if search_text:
+                applications = [a for a in applications if search_text.lower() in a.title.lower() 
+                               or search_text.lower() in a.name.lower()]
             
-            cursor.execute("""
-                SELECT a.id, a.title, a.name, a.status, 
-                    CASE WHEN du.id IS NOT NULL THEN 1 ELSE 0 END as is_linked
-                FROM applications a
-                LEFT JOIN document_usage du ON a.id = du.related_id 
-                    AND du.related_type = 'application' AND du.document_id = ?
-            """, (doc_id,))
-            
-            linked_ids = []
-            
-            for row in cursor.fetchall():
-                item_id = row[0]
-                is_linked = row[4]
-                app_tree.insert("", "end", iid=item_id, values=row[1:4])
-                if is_linked:
-                    linked_ids.append(item_id)
-            
-            for item_id in linked_ids:
-                app_tree.selection_add(item_id)
-            
-            conn.close()
+            for application in applications:
+                app_tree.insert("", "end", iid=application.id, values=(
+                    application.title, application.name, application.status))
+                if application.id in linked_applications:
+                    app_tree.selection_add(application.id)
         
         def search_contacts():
             load_contacts(contact_search_var.get())
@@ -361,43 +347,31 @@ def build_documents_tab(parent):
         actions_frame.pack(fill="x", pady=10)
         
         def link_selected():
+            """Save selected links between document and contacts/applications"""
             tab_index = tab_control.index(tab_control.select())
+            document = Document.get_by_id(doc_id)
             
-            conn = get_connection()
-            cursor = conn.cursor()
-            
-            if tab_index == 0:
-                cursor.execute("""
-                    DELETE FROM document_usage 
-                    WHERE document_id = ? AND related_type = 'contact'
-                """, (doc_id,))
+            if not document:
+                messagebox.showerror("Error", "Document not found")
+                return
                 
+            if tab_index == 0:
                 selected_items = contacts_tree.selection()
+                document.unlink_all_from('contact')
+                
                 for item_id in selected_items:
-                    cursor.execute("""
-                        INSERT INTO document_usage (document_id, related_type, related_id)
-                        VALUES (?, 'contact', ?)
-                    """, (doc_id, item_id))
+                    document.link_to('contact', item_id)
                 
                 message = f"Document linked to {len(selected_items)} contact(s) successfully!"
                 
             else:
-                cursor.execute("""
-                    DELETE FROM document_usage 
-                    WHERE document_id = ? AND related_type = 'application'
-                """, (doc_id,))
-                
                 selected_items = app_tree.selection()
+                document.unlink_all_from('application')
+                
                 for item_id in selected_items:
-                    cursor.execute("""
-                        INSERT INTO document_usage (document_id, related_type, related_id)
-                        VALUES (?, 'application', ?)
-                    """, (doc_id, item_id))
+                    document.link_to('application', item_id)
                 
                 message = f"Document linked to {len(selected_items)} application(s) successfully!"
-            
-            conn.commit()
-            conn.close()
             
             messagebox.showinfo("Success", message)
             popup.destroy()
@@ -412,47 +386,33 @@ def build_documents_tab(parent):
         load_applications()
     
     def refresh_documents():
+        """Refresh the document list with filtering applied"""
         for item in tree.get_children():
             tree.delete(item)
         
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        query = "SELECT id, name, type, version, created_at FROM documents"
+        where_clause = ""
         params = []
         
         if filter_var.get() != "All":
-            query += " WHERE type = ?"
+            where_clause = "type = ?"
             params.append(filter_var.get())
         
         if search_var.get():
-            if "WHERE" in query:
-                query += " AND (name LIKE ? OR version LIKE ? OR notes LIKE ?)"
-            else:
-                query += " WHERE (name LIKE ? OR version LIKE ? OR notes LIKE ?)"
-            
             search_param = f"%{search_var.get()}%"
+            if where_clause:
+                where_clause += " AND (name LIKE ? OR version LIKE ? OR notes LIKE ?)"
+            else:
+                where_clause = "(name LIKE ? OR version LIKE ? OR notes LIKE ?)"
             params.extend([search_param, search_param, search_param])
         
-        query += " ORDER BY created_at DESC"
+        documents = Document.find_all(where_clause, tuple(params))
         
-        cursor.execute(query, params)
-        
-        for row in cursor.fetchall():
-            doc_id = row[0]
-            name = row[1]
-            doc_type = row[2]
-            version = row[3]
-            try:
-                date = datetime.strptime(row[4], "%Y-%m-%d %H:%M:%S").strftime("%m/%d/%Y")
-            except:
-                date = row[4]
-            
-            tree.insert("", "end", iid=doc_id, values=(name, doc_type, version, date))
-        
-        conn.close()
+        for doc in documents:
+            date_str = format_date(doc.created_at, "%Y-%m-%d %H:%M:%S", "%m/%d/%Y")
+            tree.insert("", "end", iid=doc.id, values=(doc.name, doc.type, doc.version, date_str))
     
     def clear_preview_area():
+        """Clear the document preview area"""
         preview_canvas.delete("all")
         preview_canvas.pack(fill="both", expand=True)
         
@@ -461,6 +421,7 @@ def build_documents_tab(parent):
         text_preview.delete("1.0", "end")
     
     def show_document_preview(file_content, file_type):
+        """Display preview of document content if possible"""
         clear_preview_area()
         
         if len(file_content) > MAX_PREVIEW_SIZE:
@@ -538,6 +499,7 @@ def build_documents_tab(parent):
             )
 
     def on_document_select(event):
+        """Handle selection of a document in the tree view"""
         nonlocal current_doc_id
         
         selected_items = tree.selection()
@@ -547,41 +509,26 @@ def build_documents_tab(parent):
         item_id = selected_items[0]
         current_doc_id = item_id
         
-        conn = get_connection()
-        cursor = conn.cursor()
+        document = Document.get_by_id(item_id)
         
-        cursor.execute('''
-            SELECT name, type, version, file_content, file_type, notes, created_at
-            FROM documents WHERE id = ?
-        ''', (item_id,))
-        
-        doc = cursor.fetchone()
-        conn.close()
-        
-        if not doc:
+        if not document:
             return
         
-        name, doc_type, version, file_content, file_type, notes, created_at = doc
+        title_label.config(text=document.name)
+        type_label.config(text=f"Type: {document.type}")
+        version_label.config(text=f"Version: {document.version}")
         
-        title_label.config(text=name)
-        type_label.config(text=f"Type: {doc_type}")
-        version_label.config(text=f"Version: {version}")
-        
-        try:
-            date = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").strftime("%m/%d/%Y")
-        except:
-            date = created_at
-        
-        date_label.config(text=f"Date Added: {date}")
+        date_str = format_date(document.created_at, "%Y-%m-%d %H:%M:%S", "%m/%d/%Y")
+        date_label.config(text=f"Date Added: {date_str}")
         
         notes_text.config(state="normal")
         notes_text.delete("1.0", "end")
-        if notes:
-            notes_text.insert("1.0", notes)
+        if document.notes:
+            notes_text.insert("1.0", document.notes)
         notes_text.config(state="disabled")
         
-        if file_content:
-            show_document_preview(file_content, file_type)
+        if document.file_content:
+            show_document_preview(document.file_content, document.file_type)
         
         open_button.config(state="normal")
         link_button.config(state="normal")
@@ -592,6 +539,7 @@ def build_documents_tab(parent):
     tree.bind("<<TreeviewSelect>>", on_document_select)
     
     def show_document_context_menu(event):
+        """Show context menu for right-click on document"""
         item_id = tree.identify_row(event.y)
         if not item_id:
             return
@@ -611,50 +559,15 @@ def build_documents_tab(parent):
     tree.bind("<Button-3>", show_document_context_menu)
     
     def open_document(doc_id):
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT file_content, file_type, name FROM documents WHERE id = ?", (doc_id,))
-        doc = cursor.fetchone()
-        conn.close()
-        
-        if not doc:
-            messagebox.showerror("Error", "Document not found.")
-            return
-        
-        file_content, file_type, name = doc
-        
-        temp_dir = os.path.join(os.path.expanduser("~"), ".outreach_tracker")
-        os.makedirs(temp_dir, exist_ok=True)
-        
-        temp_path = os.path.join(temp_dir, f"{name}.{file_type}")
-        
-        try:
-            with open(temp_path, "wb") as f:
-                f.write(file_content)
-            
-            if os.name == 'nt':
-                os.startfile(temp_path)
-            elif os.name == 'posix':
-                opener = 'open' if os.uname().sysname == 'Darwin' else 'xdg-open'
-                subprocess.call([opener, temp_path])
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to open document: {e}")
+        """Open document with system's default application"""
+        utils_open_document(doc_id, parent)
     
     def edit_document_details(doc_id):
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT name, type, version, notes FROM documents WHERE id = ?", (doc_id,))
-        doc = cursor.fetchone()
-        conn.close()
-        
-        if not doc:
+        """Edit document metadata"""
+        document = Document.get_by_id(doc_id)
+        if not document:
             messagebox.showerror("Error", "Document not found.")
             return
-        
-        name, doc_type, version, notes = doc
         
         popup = tk.Toplevel()
         popup.title("Edit Document Details")
@@ -662,19 +575,19 @@ def build_documents_tab(parent):
         popup.transient(parent)
         
         ttk.Label(popup, text="Document Name:").pack(anchor="w", padx=20, pady=(20, 0))
-        name_var = tk.StringVar(value=name)
+        name_var = tk.StringVar(value=document.name)
         name_entry = ttk.Entry(popup, textvariable=name_var, width=40)
         name_entry.pack(anchor="w", padx=20)
         
         ttk.Label(popup, text="Document Type:").pack(anchor="w", padx=20, pady=(10, 0))
-        type_var = tk.StringVar(value=doc_type)
+        type_var = tk.StringVar(value=document.type)
         type_combo = ttk.Combobox(popup, textvariable=type_var, 
                                 values=DOCUMENT_TYPES, 
                                 state="readonly", width=20)
         type_combo.pack(anchor="w", padx=20)
         
         ttk.Label(popup, text="Version:").pack(anchor="w", padx=20, pady=(10, 0))
-        version_var = tk.StringVar(value=version)
+        version_var = tk.StringVar(value=document.version)
         version_entry = ttk.Entry(popup, textvariable=version_var, width=20)
         version_entry.pack(anchor="w", padx=20)
         
@@ -689,27 +602,16 @@ def build_documents_tab(parent):
         notes_text.pack(side="left", fill="both", expand=True)
         notes_scrollbar.pack(side="right", fill="y")
         
-        if notes:
-            notes_text.insert("1.0", notes)
+        if document.notes:
+            notes_text.insert("1.0", document.notes)
         
         def save_changes():
-            conn = get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                UPDATE documents
-                SET name = ?, type = ?, version = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ''', (
-                name_var.get(),
-                type_var.get(),
-                version_var.get(),
-                notes_text.get("1.0", "end-1c"),
-                doc_id
-            ))
-            
-            conn.commit()
-            conn.close()
+            """Save document detail changes"""
+            document.name = name_var.get()
+            document.type = type_var.get()
+            document.version = version_var.get()
+            document.notes = notes_text.get("1.0", "end-1c")
+            document.save()
             
             messagebox.showinfo("Success", "Document details updated.")
             popup.destroy()
@@ -728,19 +630,14 @@ def build_documents_tab(parent):
         cancel_button.pack(side="left", padx=5)
     
     def delete_document(doc_id):
+        """Delete document after confirmation"""
         confirm = messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this document?")
         if not confirm:
             return
         
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-        
-        cursor.execute("DELETE FROM document_usage WHERE document_id = ?", (doc_id,))
-        
-        conn.commit()
-        conn.close()
+        document = Document.get_by_id(doc_id)
+        if document:
+            document.delete()
         
         messagebox.showinfo("Success", "Document deleted successfully.")
         refresh_documents()
@@ -764,36 +661,23 @@ def build_documents_tab(parent):
             usage_button.config(state="disabled")
     
     def view_document_usage(doc_id):
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT name FROM documents WHERE id = ?", (doc_id,))
-        doc_name = cursor.fetchone()[0]
-        
-        cursor.execute('''
-            SELECT u.id, u.related_type, u.related_id, u.created_at,
-                CASE 
-                    WHEN u.related_type = 'contact' THEN o.name
-                    WHEN u.related_type = 'application' THEN a.title || ' at ' || a.name
-                    ELSE 'Unknown'
-                END as item_name
-            FROM document_usage u
-            LEFT JOIN outreaches o ON u.related_id = o.id AND u.related_type = 'contact'
-            LEFT JOIN applications a ON u.related_id = a.id AND u.related_type = 'application'
-            WHERE u.document_id = ?
-        ''', (doc_id,))
-        
-        usage_data = cursor.fetchall()
-        conn.close()
-        
+        """View where document is being used"""
+        document = Document.get_by_id(doc_id)
+        if not document:
+            messagebox.showerror("Error", "Document not found.")
+            return
+            
         popup = tk.Toplevel()
-        popup.title(f"Document Usage: {doc_name}")
+        popup.title(f"Document Usage: {document.name}")
         popup.geometry("600x400")
         popup.transient(parent)
         
-        ttk.Label(popup, text=f"Usage History for: {doc_name}", font=("Arial", 12, "bold")).pack(pady=10)
+        ttk.Label(popup, text=f"Usage History for: {document.name}", font=("Arial", 12, "bold")).pack(pady=10)
         
-        if not usage_data:
+        contact_usages = document.find_related('contact')
+        application_usages = document.find_related('application')
+        
+        if not contact_usages and not application_usages:
             ttk.Label(popup, text="This document hasn't been linked to any contacts or applications yet.").pack(pady=20)
             ttk.Label(popup, text="Use the 'Link to...' button to associate this document with contacts or applications.").pack()
         else:
@@ -810,58 +694,22 @@ def build_documents_tab(parent):
             usage_tree.pack(fill="both", expand=True, padx=10, pady=10)
             scrollbar.pack(side="right", fill="y")
             
-            contacts = []
-            applications = []
+            for contact in contact_usages:
+                contact = Contact.get_by_id(contact.id)
+                if contact:
+                    date_str = format_date(document.created_at, "%Y-%m-%d %H:%M:%S", "%m/%d/%Y")
+                    usage_tree.insert("", "end", values=("Contact", contact.name, date_str))
             
-            for usage in usage_data:
-                usage_id, related_type, related_id, created_at, item_name = usage
-                
-                try:
-                    date_used = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").strftime("%m/%d/%Y")
-                except:
-                    date_used = created_at
-                
-                if related_type == "contact":
-                    contacts.append((usage_id, "Contact", item_name, date_used))
-                else:
-                    applications.append((usage_id, "Application", item_name, date_used))
-            
-            for item in contacts + applications:
-                usage_tree.insert("", "end", iid=item[0], values=item[1:])
-            
-            def on_usage_right_click(event):
-                item_id = usage_tree.identify_row(event.y)
-                if not item_id:
-                    return
-                
-                for usage in usage_data:
-                    if str(usage[0]) == item_id:
-                        related_type = usage[1]
-                        related_id = usage[2]
-                        break
-                else:
-                    return
-                
-                menu = tk.Menu(popup, tearoff=0)
-                menu.add_command(label="Remove Link", 
-                              command=lambda: remove_link(item_id, related_type, related_id))
-                menu.tk_popup(event.x_root, event.y_root)
-            
-            usage_tree.bind("<Button-3>", on_usage_right_click)
-            
-            def remove_link(usage_id, related_type, related_id):
-                if messagebox.askyesno("Confirm", "Remove this link?"):
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM document_usage WHERE id = ?", (usage_id,))
-                    conn.commit()
-                    conn.close()
-                    popup.destroy()
-                    view_document_usage(doc_id)
+            for app in application_usages:
+                application = Application.get_by_id(app.id)
+                if application:
+                    item_name = f"{application.title} at {application.name}"
+                    date_str = format_date(document.created_at, "%Y-%m-%d %H:%M:%S", "%m/%d/%Y")
+                    usage_tree.insert("", "end", values=("Application", item_name, date_str))
         
         ttk.Button(popup, text="Close", command=popup.destroy).pack(pady=10)
         ttk.Button(popup, text="Link to More...", 
-                command=lambda: (popup.destroy(), link_document(doc_id, doc_name))).pack(pady=(0, 10))
+                command=lambda: (popup.destroy(), link_document(doc_id, document.name))).pack(pady=(0, 10))
     
     open_button.config(command=lambda: open_document(current_doc_id), state="disabled")
     link_button.config(command=lambda: link_document(current_doc_id, title_label.cget("text")), state="disabled")
@@ -869,12 +717,8 @@ def build_documents_tab(parent):
     delete_button.config(command=lambda: delete_document(current_doc_id), state="disabled")
     usage_button.config(command=lambda: view_document_usage(current_doc_id), state="disabled")
     
-    filter_combo.bind("<<ComboboxSelected>>", lambda e: refresh_documents())
-    search_entry.bind("<Return>", lambda e: refresh_documents())
-    
-    refresh_documents()
-    
     def configure_sash(event=None):
+        """Configure the paned window sash position"""
         width = paned_window.winfo_width()
         if width > 1:
             paned_window.sashpos(0, width // 2)
@@ -882,15 +726,12 @@ def build_documents_tab(parent):
     paned_window.bind("<Configure>", configure_sash)
     
     def on_resize(event=None):
+        """Update document preview when window is resized"""
         if current_doc_id:
-            conn = get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT file_content, file_type FROM documents WHERE id = ?", (current_doc_id,))
-            result = cursor.fetchone()
-            conn.close()
-            
-            if result:
-                file_content, file_type = result
-                show_document_preview(file_content, file_type)
+            document = Document.get_by_id(current_doc_id)
+            if document:
+                show_document_preview(document.file_content, document.file_type)
     
     preview_canvas.bind("<Configure>", on_resize)
+    
+    refresh_documents()
