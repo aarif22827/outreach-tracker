@@ -4,41 +4,33 @@ import os
 import subprocess
 import tempfile
 from datetime import datetime
-from tracker.database import get_connection
+from tracker.core.database import get_connection
 import base64
 from io import BytesIO
 
-# For PDF preview (optional - requires additional packages)
 try:
     from PIL import Image, ImageTk
-    import fitz  # PyMuPDF
+    import fitz
     HAS_PDF_PREVIEW = True
 except ImportError:
     HAS_PDF_PREVIEW = False
 
-# Document types
 DOCUMENT_TYPES = ["Resume", "Cover Letter", "Portfolio", "References", "Other"]
 
-# Max file size for preview (5MB)
 MAX_PREVIEW_SIZE = 5 * 1024 * 1024
 
 def build_documents_tab(parent):
-    # Use simple frames with pack instead of PanedWindow
     main_frame = tk.Frame(parent)
     main_frame.pack(fill="both", expand=True)
     
-    # Create horizontal paned window without weight configuration
     paned_window = ttk.PanedWindow(main_frame, orient="horizontal")
     paned_window.pack(fill="both", expand=True)
     
-    # Left side - Document list
     list_frame = ttk.Frame(paned_window)
     
-    # Top actions bar
     actions_frame = ttk.Frame(list_frame)
     actions_frame.pack(fill="x", pady=5)
     
-    # Filter by type
     ttk.Label(actions_frame, text="Filter:").pack(side="left")
     filter_var = tk.StringVar(value="All")
     filter_combo = ttk.Combobox(actions_frame, textvariable=filter_var, 
@@ -46,18 +38,15 @@ def build_documents_tab(parent):
                              state="readonly", width=15)
     filter_combo.pack(side="left", padx=5)
     
-    # Upload button
     upload_button = ttk.Button(actions_frame, text="Upload Document",
                             command=lambda: upload_document())
     upload_button.pack(side="right", padx=5)
     
-    # Search field
     search_var = tk.StringVar()
     search_entry = ttk.Entry(actions_frame, textvariable=search_var, width=20)
     search_entry.pack(side="right", padx=5)
     ttk.Label(actions_frame, text="Search:").pack(side="right")
     
-    # Documents treeview
     tree_frame = ttk.Frame(list_frame)
     tree_frame.pack(fill="both", expand=True, pady=5)
     
@@ -74,14 +63,11 @@ def build_documents_tab(parent):
     tree.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
     
-    # Right side - Preview panel
     preview_frame = ttk.LabelFrame(paned_window, text="Document Preview")
     
-    # Preview content
     preview_content = ttk.Frame(preview_frame)
     preview_content.pack(fill="both", expand=True, padx=10, pady=10)
     
-    # Title and info display
     title_label = ttk.Label(preview_content, text="Select a document to preview", font=("Arial", 14, "bold"))
     title_label.pack(pady=10)
     
@@ -97,20 +83,16 @@ def build_documents_tab(parent):
     date_label = ttk.Label(info_frame, text="Date: ")
     date_label.grid(row=2, column=0, sticky="w", padx=5, pady=2)
     
-    # Actual document preview area
     preview_area_frame = ttk.LabelFrame(preview_content, text="Content Preview")
     preview_area_frame.pack(fill="both", expand=True, pady=10)
     
-    # Preview canvas for images/PDFs
     preview_canvas = tk.Canvas(preview_area_frame, bg="white")
     preview_canvas.pack(fill="both", expand=True, padx=5, pady=5)
     
-    # Text preview for text documents - initially hidden
     text_preview = tk.Text(preview_area_frame, wrap="word", height=20)
     text_preview_scrollbar = ttk.Scrollbar(preview_area_frame, orient="vertical", command=text_preview.yview)
     text_preview.configure(yscrollcommand=text_preview_scrollbar.set)
     
-    # Notes and details
     notes_frame = ttk.LabelFrame(preview_content, text="Notes")
     notes_frame.pack(fill="x", expand=False, pady=10)
     
@@ -122,12 +104,14 @@ def build_documents_tab(parent):
     notes_scrollbar.pack(side="right", fill="y", pady=5)
     notes_text.config(state="disabled")
     
-    # Action buttons
     button_frame = ttk.Frame(preview_content)
     button_frame.pack(fill="x", pady=10)
     
     open_button = ttk.Button(button_frame, text="Open Document")
     open_button.pack(side="left", padx=5)
+    
+    link_button = ttk.Button(button_frame, text="Link to...")
+    link_button.pack(side="left", padx=5)
     
     edit_button = ttk.Button(button_frame, text="Edit Details")
     edit_button.pack(side="left", padx=5)
@@ -138,14 +122,11 @@ def build_documents_tab(parent):
     usage_button = ttk.Button(button_frame, text="View Usage")
     usage_button.pack(side="left", padx=5)
     
-    # Add the frames to the paned window without weights
     paned_window.add(list_frame)
     paned_window.add(preview_frame)
     
-    # Current document tracking
     current_doc_id = None
     
-    # Upload document function
     def upload_document():
         file_path = filedialog.askopenfilename(
             title="Select Document",
@@ -161,13 +142,11 @@ def build_documents_tab(parent):
         if not file_path:
             return
         
-        # Create a popup for document details
         popup = tk.Toplevel()
         popup.title("Document Details")
         popup.geometry("400x350")
         popup.transient(parent)
         
-        # Document details form
         ttk.Label(popup, text="Document Name:").pack(anchor="w", padx=20, pady=(20, 0))
         name_var = tk.StringVar(value=os.path.basename(file_path))
         name_entry = ttk.Entry(popup, textvariable=name_var, width=40)
@@ -201,7 +180,7 @@ def build_documents_tab(parent):
                 with open(file_path, "rb") as f:
                     file_content = f.read()
                 
-                file_type = os.path.splitext(file_path)[1][1:]  # Get extension without dot
+                file_type = os.path.splitext(file_path)[1][1:]
                 
                 conn = get_connection()
                 cursor = conn.cursor()
@@ -229,7 +208,6 @@ def build_documents_tab(parent):
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to upload document: {e}")
         
-        # Buttons
         button_frame = ttk.Frame(popup)
         button_frame.pack(pady=15)
         
@@ -239,7 +217,200 @@ def build_documents_tab(parent):
         cancel_button = ttk.Button(button_frame, text="Cancel", command=popup.destroy)
         cancel_button.pack(side="left", padx=5)
     
-    # Refresh document list
+    def link_document(doc_id, doc_name):
+        """Function to link a document to contacts or applications"""
+        popup = tk.Toplevel()
+        popup.title(f"Link Document: {doc_name}")
+        popup.geometry("600x500")
+        popup.transient(parent)
+        
+        tab_control = ttk.Notebook(popup)
+        tab_control.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        contacts_tab = ttk.Frame(tab_control)
+        applications_tab = ttk.Frame(tab_control)
+        
+        tab_control.add(contacts_tab, text="Contacts")
+        tab_control.add(applications_tab, text="Applications")
+        
+        contacts_frame = ttk.Frame(contacts_tab)
+        contacts_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        search_frame = ttk.Frame(contacts_frame)
+        search_frame.pack(fill="x", pady=5)
+        
+        ttk.Label(search_frame, text="Search:").pack(side="left")
+        contact_search_var = tk.StringVar()
+        contact_search = ttk.Entry(search_frame, textvariable=contact_search_var, width=30)
+        contact_search.pack(side="left", padx=5)
+        
+        contacts_list_frame = ttk.Frame(contacts_frame)
+        contacts_list_frame.pack(fill="both", expand=True, pady=5)
+        
+        contacts_columns = ("Name", "Company", "Title")
+        contacts_tree = ttk.Treeview(contacts_list_frame, columns=contacts_columns, show="headings", selectmode="extended")
+        
+        for col in contacts_columns:
+            contacts_tree.heading(col, text=col)
+            contacts_tree.column(col, width=100)
+        
+        contacts_scrollbar = ttk.Scrollbar(contacts_list_frame, orient="vertical", command=contacts_tree.yview)
+        contacts_tree.configure(yscrollcommand=contacts_scrollbar.set)
+        
+        contacts_tree.pack(side="left", fill="both", expand=True)
+        contacts_scrollbar.pack(side="right", fill="y")
+        
+        applications_frame = ttk.Frame(applications_tab)
+        applications_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        app_search_frame = ttk.Frame(applications_frame)
+        app_search_frame.pack(fill="x", pady=5)
+        
+        ttk.Label(app_search_frame, text="Search:").pack(side="left")
+        app_search_var = tk.StringVar()
+        app_search = ttk.Entry(app_search_frame, textvariable=app_search_var, width=30)
+        app_search.pack(side="left", padx=5)
+        
+        app_list_frame = ttk.Frame(applications_frame)
+        app_list_frame.pack(fill="both", expand=True, pady=5)
+        
+        app_columns = ("Job Title", "Company", "Status")
+        app_tree = ttk.Treeview(app_list_frame, columns=app_columns, show="headings", selectmode="extended")
+        
+        for col in app_columns:
+            app_tree.heading(col, text=col)
+            app_tree.column(col, width=100)
+        
+        app_scrollbar = ttk.Scrollbar(app_list_frame, orient="vertical", command=app_tree.yview)
+        app_tree.configure(yscrollcommand=app_scrollbar.set)
+        
+        app_tree.pack(side="left", fill="both", expand=True)
+        app_scrollbar.pack(side="right", fill="y")
+        
+        def load_contacts(search_text=""):
+            for item in contacts_tree.get_children():
+                contacts_tree.delete(item)
+            
+            conn = get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT o.id, o.name, o.company, o.title, 
+                    CASE WHEN du.id IS NOT NULL THEN 1 ELSE 0 END as is_linked
+                FROM outreaches o
+                LEFT JOIN document_usage du ON o.id = du.related_id 
+                    AND du.related_type = 'contact' AND du.document_id = ?
+            """, (doc_id,))
+            
+            linked_ids = []
+            
+            for row in cursor.fetchall():
+                item_id = row[0]
+                is_linked = row[4]
+                contacts_tree.insert("", "end", iid=item_id, values=row[1:4])
+                if is_linked:
+                    linked_ids.append(item_id)
+            
+            for item_id in linked_ids:
+                contacts_tree.selection_add(item_id)
+            
+            conn.close()
+        
+        def load_applications(search_text=""):
+            for item in app_tree.get_children():
+                app_tree.delete(item)
+            
+            conn = get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT a.id, a.title, a.name, a.status, 
+                    CASE WHEN du.id IS NOT NULL THEN 1 ELSE 0 END as is_linked
+                FROM applications a
+                LEFT JOIN document_usage du ON a.id = du.related_id 
+                    AND du.related_type = 'application' AND du.document_id = ?
+            """, (doc_id,))
+            
+            linked_ids = []
+            
+            for row in cursor.fetchall():
+                item_id = row[0]
+                is_linked = row[4]
+                app_tree.insert("", "end", iid=item_id, values=row[1:4])
+                if is_linked:
+                    linked_ids.append(item_id)
+            
+            for item_id in linked_ids:
+                app_tree.selection_add(item_id)
+            
+            conn.close()
+        
+        def search_contacts():
+            load_contacts(contact_search_var.get())
+        
+        def search_applications():
+            load_applications(app_search_var.get())
+        
+        contact_search.bind("<Return>", lambda e: search_contacts())
+        app_search.bind("<Return>", lambda e: search_applications())
+        
+        ttk.Button(search_frame, text="Search", command=search_contacts).pack(side="left", padx=5)
+        ttk.Button(app_search_frame, text="Search", command=search_applications).pack(side="left", padx=5)
+        
+        actions_frame = ttk.Frame(popup)
+        actions_frame.pack(fill="x", pady=10)
+        
+        def link_selected():
+            tab_index = tab_control.index(tab_control.select())
+            
+            conn = get_connection()
+            cursor = conn.cursor()
+            
+            if tab_index == 0:
+                cursor.execute("""
+                    DELETE FROM document_usage 
+                    WHERE document_id = ? AND related_type = 'contact'
+                """, (doc_id,))
+                
+                selected_items = contacts_tree.selection()
+                for item_id in selected_items:
+                    cursor.execute("""
+                        INSERT INTO document_usage (document_id, related_type, related_id)
+                        VALUES (?, 'contact', ?)
+                    """, (doc_id, item_id))
+                
+                message = f"Document linked to {len(selected_items)} contact(s) successfully!"
+                
+            else:
+                cursor.execute("""
+                    DELETE FROM document_usage 
+                    WHERE document_id = ? AND related_type = 'application'
+                """, (doc_id,))
+                
+                selected_items = app_tree.selection()
+                for item_id in selected_items:
+                    cursor.execute("""
+                        INSERT INTO document_usage (document_id, related_type, related_id)
+                        VALUES (?, 'application', ?)
+                    """, (doc_id, item_id))
+                
+                message = f"Document linked to {len(selected_items)} application(s) successfully!"
+            
+            conn.commit()
+            conn.close()
+            
+            messagebox.showinfo("Success", message)
+            popup.destroy()
+        
+        link_btn = ttk.Button(actions_frame, text="Save Links", command=link_selected)
+        link_btn.pack(side="left", padx=5)
+        
+        cancel_btn = ttk.Button(actions_frame, text="Cancel", command=popup.destroy)
+        cancel_btn.pack(side="left", padx=5)
+        
+        load_contacts()
+        load_applications()
+    
     def refresh_documents():
         for item in tree.get_children():
             tree.delete(item)
@@ -281,22 +452,17 @@ def build_documents_tab(parent):
         
         conn.close()
     
-    # Clear preview area
     def clear_preview_area():
-        # Clear canvas
         preview_canvas.delete("all")
         preview_canvas.pack(fill="both", expand=True)
         
-        # Hide and clear text preview
         text_preview.pack_forget()
         text_preview_scrollbar.pack_forget()
         text_preview.delete("1.0", "end")
     
-    # Show document preview based on file type
     def show_document_preview(file_content, file_type):
         clear_preview_area()
         
-        # If file is large (>5MB), don't attempt preview
         if len(file_content) > MAX_PREVIEW_SIZE:
             preview_canvas.create_text(
                 preview_canvas.winfo_width() // 2, 
@@ -306,11 +472,9 @@ def build_documents_tab(parent):
             )
             return
             
-        # Handle different file types
         file_type = file_type.lower()
         
         if file_type == "txt":
-            # Show text preview
             preview_canvas.pack_forget()
             text_preview.pack(side="left", fill="both", expand=True)
             text_preview_scrollbar.pack(side="right", fill="y")
@@ -325,44 +489,35 @@ def build_documents_tab(parent):
                 
         elif file_type == "pdf" and HAS_PDF_PREVIEW:
             try:
-                # Create temporary file for PyMuPDF
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                     tmp.write(file_content)
                     tmp_path = tmp.name
                 
-                # Open PDF and render first page
                 pdf_document = fitz.open(tmp_path)
                 if pdf_document.page_count > 0:
-                    page = pdf_document.load_page(0)  # First page
+                    page = pdf_document.load_page(0)
                     pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
                     
-                    # Convert to PIL Image
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     
-                    # Resize if needed
                     canvas_width = preview_canvas.winfo_width() or 400
                     canvas_height = preview_canvas.winfo_height() or 400
                     
-                    # Keep aspect ratio
                     img_ratio = img.width / img.height
                     canvas_ratio = canvas_width / canvas_height
                     
                     if img_ratio > canvas_ratio:
-                        # Image is wider than canvas
                         new_width = canvas_width
                         new_height = int(canvas_width / img_ratio)
                     else:
-                        # Image is taller than canvas
                         new_height = canvas_height
                         new_width = int(canvas_height * img_ratio)
                     
                     img = img.resize((new_width, new_height), Image.LANCZOS)
                     
-                    # Create PhotoImage and display on canvas
                     photo = ImageTk.PhotoImage(img)
                     preview_canvas.create_image(canvas_width//2, canvas_height//2, image=photo, anchor=tk.CENTER)
                     
-                    # Keep reference to prevent garbage collection
                     preview_canvas.image = photo
                     
                 pdf_document.close()
@@ -375,7 +530,6 @@ def build_documents_tab(parent):
                     justify=tk.CENTER
                 )
         else:
-            # For other file types, show file type icon or message
             preview_canvas.create_text(
                 preview_canvas.winfo_width() // 2, 
                 preview_canvas.winfo_height() // 2,
@@ -383,7 +537,6 @@ def build_documents_tab(parent):
                 justify=tk.CENTER
             )
 
-    # Show document details when selected
     def on_document_select(event):
         nonlocal current_doc_id
         
@@ -410,7 +563,6 @@ def build_documents_tab(parent):
         
         name, doc_type, version, file_content, file_type, notes, created_at = doc
         
-        # Update display
         title_label.config(text=name)
         type_label.config(text=f"Type: {doc_type}")
         version_label.config(text=f"Version: {version}")
@@ -422,26 +574,23 @@ def build_documents_tab(parent):
         
         date_label.config(text=f"Date Added: {date}")
         
-        # Update notes
         notes_text.config(state="normal")
         notes_text.delete("1.0", "end")
         if notes:
             notes_text.insert("1.0", notes)
         notes_text.config(state="disabled")
         
-        # Show document preview
         if file_content:
             show_document_preview(file_content, file_type)
         
-        # Enable buttons
         open_button.config(state="normal")
+        link_button.config(state="normal")
         edit_button.config(state="normal")
         delete_button.config(state="normal")
         usage_button.config(state="normal")
     
     tree.bind("<<TreeviewSelect>>", on_document_select)
     
-    # Context menu for documents
     def show_document_context_menu(event):
         item_id = tree.identify_row(event.y)
         if not item_id:
@@ -451,6 +600,7 @@ def build_documents_tab(parent):
         
         context_menu = tk.Menu(tree, tearoff=0)
         context_menu.add_command(label="Open Document", command=lambda: open_document(item_id))
+        context_menu.add_command(label="Link Document", command=lambda: link_document(item_id, tree.item(item_id, 'values')[0]))
         context_menu.add_command(label="Edit Details", command=lambda: edit_document_details(item_id))
         context_menu.add_command(label="View Usage", command=lambda: view_document_usage(item_id))
         context_menu.add_separator()
@@ -460,7 +610,6 @@ def build_documents_tab(parent):
     
     tree.bind("<Button-3>", show_document_context_menu)
     
-    # Document actions
     def open_document(doc_id):
         conn = get_connection()
         cursor = conn.cursor()
@@ -475,7 +624,6 @@ def build_documents_tab(parent):
         
         file_content, file_type, name = doc
         
-        # Create a temporary file and open it
         temp_dir = os.path.join(os.path.expanduser("~"), ".outreach_tracker")
         os.makedirs(temp_dir, exist_ok=True)
         
@@ -485,10 +633,9 @@ def build_documents_tab(parent):
             with open(temp_path, "wb") as f:
                 f.write(file_content)
             
-            # Open with default application
-            if os.name == 'nt':  # Windows
+            if os.name == 'nt':
                 os.startfile(temp_path)
-            elif os.name == 'posix':  # macOS, Linux
+            elif os.name == 'posix':
                 opener = 'open' if os.uname().sysname == 'Darwin' else 'xdg-open'
                 subprocess.call([opener, temp_path])
             
@@ -509,7 +656,6 @@ def build_documents_tab(parent):
         
         name, doc_type, version, notes = doc
         
-        # Create popup for editing
         popup = tk.Toplevel()
         popup.title("Edit Document Details")
         popup.geometry("400x350")
@@ -569,7 +715,6 @@ def build_documents_tab(parent):
             popup.destroy()
             refresh_documents()
             
-            # Update preview if this is the current document
             if doc_id == current_doc_id:
                 on_document_select(None)
         
@@ -590,10 +735,8 @@ def build_documents_tab(parent):
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Delete document
         cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
         
-        # Also delete any usage records
         cursor.execute("DELETE FROM document_usage WHERE document_id = ?", (doc_id,))
         
         conn.commit()
@@ -602,7 +745,6 @@ def build_documents_tab(parent):
         messagebox.showinfo("Success", "Document deleted successfully.")
         refresh_documents()
         
-        # Clear preview if this was the current document
         if doc_id == current_doc_id:
             title_label.config(text="Select a document to preview")
             type_label.config(text="Type: ")
@@ -615,8 +757,8 @@ def build_documents_tab(parent):
             
             clear_preview_area()
             
-            # Disable buttons
             open_button.config(state="disabled")
+            link_button.config(state="disabled")
             edit_button.config(state="disabled")
             delete_button.config(state="disabled")
             usage_button.config(state="disabled")
@@ -625,11 +767,9 @@ def build_documents_tab(parent):
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Get document name
         cursor.execute("SELECT name FROM documents WHERE id = ?", (doc_id,))
         doc_name = cursor.fetchone()[0]
         
-        # Get usage information
         cursor.execute('''
             SELECT u.id, u.related_type, u.related_id, u.created_at,
                 CASE 
@@ -646,7 +786,6 @@ def build_documents_tab(parent):
         usage_data = cursor.fetchall()
         conn.close()
         
-        # Create popup to display usage
         popup = tk.Toplevel()
         popup.title(f"Document Usage: {doc_name}")
         popup.geometry("600x400")
@@ -655,10 +794,10 @@ def build_documents_tab(parent):
         ttk.Label(popup, text=f"Usage History for: {doc_name}", font=("Arial", 12, "bold")).pack(pady=10)
         
         if not usage_data:
-            ttk.Label(popup, text="This document hasn't been used yet.").pack(pady=20)
+            ttk.Label(popup, text="This document hasn't been linked to any contacts or applications yet.").pack(pady=20)
+            ttk.Label(popup, text="Use the 'Link to...' button to associate this document with contacts or applications.").pack()
         else:
-            # Create treeview to display usage
-            columns = ("Used For", "Item", "Date Used")
+            columns = ("Type", "Name", "Date Linked")
             usage_tree = ttk.Treeview(popup, columns=columns, show="headings")
             
             for col in columns:
@@ -671,34 +810,70 @@ def build_documents_tab(parent):
             usage_tree.pack(fill="both", expand=True, padx=10, pady=10)
             scrollbar.pack(side="right", fill="y")
             
+            contacts = []
+            applications = []
+            
             for usage in usage_data:
                 usage_id, related_type, related_id, created_at, item_name = usage
-                
-                related_type_display = "Contact" if related_type == "contact" else "Application"
                 
                 try:
                     date_used = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").strftime("%m/%d/%Y")
                 except:
                     date_used = created_at
                 
-                usage_tree.insert("", "end", iid=usage_id, values=(related_type_display, item_name, date_used))
+                if related_type == "contact":
+                    contacts.append((usage_id, "Contact", item_name, date_used))
+                else:
+                    applications.append((usage_id, "Application", item_name, date_used))
+            
+            for item in contacts + applications:
+                usage_tree.insert("", "end", iid=item[0], values=item[1:])
+            
+            def on_usage_right_click(event):
+                item_id = usage_tree.identify_row(event.y)
+                if not item_id:
+                    return
+                
+                for usage in usage_data:
+                    if str(usage[0]) == item_id:
+                        related_type = usage[1]
+                        related_id = usage[2]
+                        break
+                else:
+                    return
+                
+                menu = tk.Menu(popup, tearoff=0)
+                menu.add_command(label="Remove Link", 
+                              command=lambda: remove_link(item_id, related_type, related_id))
+                menu.tk_popup(event.x_root, event.y_root)
+            
+            usage_tree.bind("<Button-3>", on_usage_right_click)
+            
+            def remove_link(usage_id, related_type, related_id):
+                if messagebox.askyesno("Confirm", "Remove this link?"):
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM document_usage WHERE id = ?", (usage_id,))
+                    conn.commit()
+                    conn.close()
+                    popup.destroy()
+                    view_document_usage(doc_id)
         
         ttk.Button(popup, text="Close", command=popup.destroy).pack(pady=10)
+        ttk.Button(popup, text="Link to More...", 
+                command=lambda: (popup.destroy(), link_document(doc_id, doc_name))).pack(pady=(0, 10))
     
-    # Connect button actions
     open_button.config(command=lambda: open_document(current_doc_id), state="disabled")
+    link_button.config(command=lambda: link_document(current_doc_id, title_label.cget("text")), state="disabled")
     edit_button.config(command=lambda: edit_document_details(current_doc_id), state="disabled")
     delete_button.config(command=lambda: delete_document(current_doc_id), state="disabled")
     usage_button.config(command=lambda: view_document_usage(current_doc_id), state="disabled")
     
-    # Connect filter and search actions
     filter_combo.bind("<<ComboboxSelected>>", lambda e: refresh_documents())
     search_entry.bind("<Return>", lambda e: refresh_documents())
     
-    # Initial load
     refresh_documents()
     
-    # Set up the initial position of the sash to divide space roughly equally
     def configure_sash(event=None):
         width = paned_window.winfo_width()
         if width > 1:
@@ -706,9 +881,7 @@ def build_documents_tab(parent):
     
     paned_window.bind("<Configure>", configure_sash)
     
-    # Adjust canvas and preview when window resizes
     def on_resize(event=None):
-        # Only update if we have a document selected
         if current_doc_id:
             conn = get_connection()
             cursor = conn.cursor()

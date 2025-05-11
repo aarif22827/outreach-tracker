@@ -68,7 +68,6 @@ def create_tables():
         )
     ''')
 
-    # New tables for resources
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS documents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
